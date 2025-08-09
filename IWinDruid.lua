@@ -298,6 +298,12 @@ function IWin:StartAttack()
 	end
 end
 
+function IWin:Growl()
+	if IWin:IsSpellLearnt("Growl") and not IWin:IsTanking() and not IWin:IsOnCooldown("Growl") and not IWin:IsTaunted() then
+		Cast("Growl")
+	end
+end
+
 function IWin:MarkOfTheWild()
 	if IWin:IsSpellLearnt("Mark of the Wild") and IWin:GetBuffRemaining("player","Mark of the Wild") < 60 and not UnitAffectingCombat("player") then
 		Cast("Mark of the Wild")
@@ -420,6 +426,6 @@ end
 SLASH_ITAUNT1 = '/itaunt'
 function SlashCmdList.ITAUNT()
 	IWin:TargetEnemy()
-	
+	IWin:Growl()
 	IWin:StartAttack()
 end
