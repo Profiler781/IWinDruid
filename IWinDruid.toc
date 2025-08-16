@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: IWinDruid
 ## Notes: Smart macros for turtle druids
-## Version: 1.1
+## Version: 0.3
 ## SavedVariables: 
 ## OptionalDeps: ShaguTweaks, pfUI
 
