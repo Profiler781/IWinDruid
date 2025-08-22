@@ -13,12 +13,15 @@ IWin.t = CreateFrame("GameTooltip", "IWin_T", UIParent, "GameTooltipTemplate")
 local IWin_Settings = {
 	["rageTimeToReserveBuffer"] = 1.5,
 	["ragePerSecondPrediction"] = 10, -- change it to match your gear and buffs
+	["outOfRaidCombatLength"] = 20,
+	["playerToNPCHealthRatio"] = 0.75,
 }
 local IWin_CombatVar = {
 	["dodge"] = 0,
 	["reservedRage"] = 0,
 	["reservedRageStance"] = nil,
 	["charge"] = 0,
+	["queue"] = true,
 }
 local Cast = CastSpellByName
 
@@ -45,7 +48,8 @@ function IWin:GetTalentRank(tabIndex, talentIndex)
 end
 
 IWin_RageCost = {
-	
+	["Demoralizing Roar"] = 10,
+	["Maul"] = 15 - IWin:GetTalentRank(2, 1),
 }
 
 IWin_Taunt = {
@@ -124,18 +128,18 @@ function IWin:IsBuffStack(unit, spell, stack)
 end
 
 function IWin:IsBuffActive(unit, spell)
-	return IWin:GetBuffStack(unit, spell) ~= 0
+	return IWin:GetBuffRemaining(unit, spell) ~= 0
 end
 
 function IWin:GetBuffRemaining(unit, spell)
 	if unit == "player" then
 		local index = IWin:GetBuffIndex(unit, spell)
 		if index then
-			return GetPlayerBuffTimeLeft(index - 1)
+			return GetPlayerBuffTimeLeft(index)
 		end
 		local index = IWin:GetDebuffIndex(unit, spell)
 		if index then
-			return GetPlayerBuffTimeLeft(index - 1)
+			return GetPlayerBuffTimeLeft(index)
 		end
 	elseif unit == "target" then
 		local libdebuff = pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
@@ -193,13 +197,26 @@ function IWin:IsCharging()
 end
 
 function IWin:IsStanceActive(stance)
-	for index = 1, 3 do
+	local forms = GetNumShapeshiftForms()
+	for index = 1, forms do
 		local _, name, active = GetShapeshiftFormInfo(index)
 		if name == stance then
 			return active == 1
 		end
 	end
 	return false
+end
+
+function IWin:GetTimeToDie()
+	local ttd = 0
+	if UnitInRaid("player") then
+		ttd = 999
+	elseif GetNumPartyMembers() ~= 0 then
+		ttd = UnitHealth("target") / UnitHealthMax("player") * IWin_Settings["playerToNPCHealthRatio"] * IWin_Settings["outOfRaidCombatLength"] / GetNumPartyMembers()
+	else
+		ttd = UnitHealth("target") / UnitHealthMax("player") * IWin_Settings["playerToNPCHealthRatio"] * IWin_Settings["outOfRaidCombatLength"]
+	end
+	return ttd
 end
 
 function IWin:GetHealthPercent(unit)
@@ -219,8 +236,12 @@ function IWin:IsRageCostAvailable(spell)
 	return UnitMana("player") >= IWin_RageCost[spell]
 end
 
-function IWin:IsInMeleeRange()
-	return CheckInteractDistance("target", 3) ~= nil
+function IWin:IsInRange(spell)
+	if not IsSpellInRange then
+        return CheckInteractDistance("target", 3) ~= nil
+	else
+		return IsSpellInRange(spell, "target") == 1
+	end
 end
 
 function IWin:GetRageToReserve(spell, trigger, unit)
@@ -249,6 +270,14 @@ end
 
 function IWin:SetReservedRage(spell, trigger, unit)
 	IWin_CombatVar["reservedRage"] = IWin_CombatVar["reservedRage"] + IWin:GetRageToReserve(spell, trigger, unit)
+end
+
+function IWin:IsInRange(spell)
+	if not IsSpellInRange then
+        return CheckInteractDistance("target", 3)
+	else
+		return IsSpellInRange(spell, "target")
+	end
 end
 
 function IWin:IsTanking()
@@ -294,7 +323,7 @@ function IWin:IsTaunted()
 	return false
 end
 
----- Actions ----
+---- General Actions ----
 function IWin:TargetEnemy()
 	if not UnitExists("target") or UnitIsDead("target") or UnitIsFriend("target", "player") then
 		TargetNearestEnemy()
@@ -311,44 +340,129 @@ function IWin:StartAttack()
 			end
 		end
 	end
-	if not attackActionFound and not PlayerFrame.inCombat then
-		AttackTarget()
+	if not attackActionFound
+		and not PlayerFrame.inCombat then
+			AttackTarget()
+	end
+end
+
+function IWin:MarkSkull()
+	if UnitExists("target")
+		and GetRaidTargetIndex("target") ~= 8
+		and not UnitIsFriend("player", "target")
+		and not UnitInRaid("player") then
+			SetRaidTarget("target", 8)
+	end
+end
+
+function IWin:CancelPlayerBuff(spell)
+	local index = IWin:GetBuffIndex("player", spell)
+	DEFAULT_CHAT_FRAME:AddMessage(index)
+	if index then
+		CancelPlayerBuff(index)
+	end
+end
+
+function IWin:CancelForm()
+	IWin:CancelPlayerBuff("Bear Form")
+	IWin:CancelPlayerBuff("Cat Form")
+end
+
+---- Class Actions ----
+function IWin:BearForm()
+	if IWin:IsSpellLearnt("Bear Form")
+		and not IWin:IsStanceActive("Bear Form") then
+			Cast("Bear Form")
+	end
+end
+
+function IWin:DemoralizingRoar()
+	if IWin:IsSpellLearnt("Demoralizing Roar")
+		and IWin:IsRageAvailable("Demoralizing Roar")
+		and IWin:IsInRange("Growl")
+		and not IWin:IsBuffActive("target", "Demoralizing Roar")
+		and IWin:GetTimeToDie() > 10 then
+			Cast("Demoralizing Roar")
+	end
+end
+
+function IWin:Enrage()
+	if IWin:IsSpellLearnt("Enrage")
+		and not IWin:IsOnCooldown("Enrage")
+		and UnitMana("player") < 50 then
+			Cast("Enrage")
 	end
 end
 
 function IWin:Growl()
-	if IWin:IsSpellLearnt("Growl") and not IWin:IsTanking() and not IWin:IsOnCooldown("Growl") and not IWin:IsTaunted() then
-		Cast("Growl")
+	if IWin:IsSpellLearnt("Growl")
+		and not IWin:IsTanking()
+		and not IWin:IsOnCooldown("Growl")
+		and not IWin:IsTaunted() then
+			if not IWin:IsStanceActive("Bear Form") then
+				Cast("Bear Form")
+			else
+				Cast("Growl")
+			end
 	end
 end
 
 function IWin:MarkOfTheWild()
-	if IWin:IsSpellLearnt("Mark of the Wild") and IWin:GetBuffRemaining("player","Mark of the Wild") < 60 and not UnitAffectingCombat("player") then
-		Cast("Mark of the Wild")
+	if IWin:IsSpellLearnt("Mark of the Wild")
+		and IWin_CombatVar["queue"]
+		and IWin:GetBuffRemaining("player","Mark of the Wild") < 60
+		and not UnitAffectingCombat("player") then
+			IWin_CombatVar["queue"] = false
+			IWin:CancelForm()
+			Cast("Mark of the Wild")
+	end
+end
+
+function IWin:Maul()
+	if IWin:IsSpellLearnt("Maul")
+		and IWin:IsStanceActive("Bear Form") then
+			if IWin:IsRageAvailable("Maul") then
+				Cast("Maul")
+			else
+				--SpellStopCasting()
+			end
 	end
 end
 
 function IWin:Moonfire()
-	if IWin:IsSpellLearnt("Moonfire") and not IWin:IsBuffActive("target", "Moonfire") then
-		Cast("Moonfire")
+	if IWin:IsSpellLearnt("Moonfire")
+		--and IWin_CombatVar["queue"]
+		and not IWin:IsBuffActive("target", "Moonfire") then
+			IWin_CombatVar["queue"] = false
+			Cast("Moonfire")
 	end
 end
 
 function IWin:Thorns()
-	if IWin:IsSpellLearnt("Thorns") and IWin:GetBuffRemaining("player","Thorns") < 60 and not UnitAffectingCombat("player") then
-		Cast("Thorns")
+	if IWin:IsSpellLearnt("Thorns")
+		and IWin_CombatVar["queue"]
+		and IWin:GetBuffRemaining("player","Thorns") < 60
+		and not UnitAffectingCombat("player") then
+			IWin_CombatVar["queue"] = false
+			IWin:CancelForm()
+			Cast("Thorns")
 	end
 end
 
 function IWin:Wrath()
-	if IWin:IsSpellLearnt("Wrath") then
-		Cast("Wrath")
+	if IWin:IsSpellLearnt("Wrath")
+		and IWin_CombatVar["queue"] then
+			IWin_CombatVar["queue"] = false
+			Cast("Wrath")
 	end
 end
 
 function IWin:WrathOOC()
-	if IWin:IsSpellLearnt("Wrath") and not UnitAffectingCombat("player") then
-		Cast("Wrath")
+	if IWin:IsSpellLearnt("Wrath")
+		--and IWin_CombatVar["queue"]
+		and not UnitAffectingCombat("player") then
+			IWin_CombatVar["queue"] = false
+			Cast("Wrath")
 	end
 end
 
@@ -364,7 +478,9 @@ SLASH_IBLAST1 = '/iblast'
 function SlashCmdList.IBLAST()
 	IWin_CombatVar["reservedRage"] = 0
 	IWin_CombatVar["reservedRageStance"] = nil
+	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
+	IWin:StartAttack()
 	IWin:MarkOfTheWild()
 	IWin:Thorns()
 	IWin:WrathOOC()
@@ -378,7 +494,7 @@ function SlashCmdList.ISTORM()
 	IWin_CombatVar["reservedRage"] = 0
 	IWin_CombatVar["reservedRageStance"] = nil
 	IWin:TargetEnemy()
-
+	IWin:StartAttack()
 end
 
 ---- iruetoo button ----
@@ -406,8 +522,16 @@ SLASH_ITANK1 = '/itank'
 function SlashCmdList.ITANK()
 	IWin_CombatVar["reservedRage"] = 0
 	IWin_CombatVar["reservedRageStance"] = nil
+	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
-
+	IWin:MarkSkull()
+	IWin:MarkOfTheWild()
+	IWin:Thorns()
+	IWin:BearForm()
+	IWin:DemoralizingRoar()
+	IWin:SetReservedRage("Demoralizing Roar", "debuff", "target")
+	IWin:Enrage()
+	IWin:Maul()
 	IWin:StartAttack()
 end
 
@@ -416,8 +540,15 @@ SLASH_IHODOR1 = '/ihodor'
 function SlashCmdList.IHODOR()
 	IWin_CombatVar["reservedRage"] = 0
 	IWin_CombatVar["reservedRageStance"] = nil
+	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
-
+	IWin:MarkSkull()
+	IWin:MarkOfTheWild()
+	IWin:Thorns()
+	IWin:BearForm()
+	IWin:DemoralizingRoar()
+	IWin:SetReservedRage("Demoralizing Roar", "debuff", "target")
+	IWin:Maul()
 	IWin:StartAttack()
 end
 
