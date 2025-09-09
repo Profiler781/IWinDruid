@@ -10,13 +10,7 @@ if UnitClass("player") ~= "Druid" then return end
 ---- Loading ----
 IWin = CreateFrame("frame",nil,UIParent)
 IWin.t = CreateFrame("GameTooltip", "IWin_T", UIParent, "GameTooltipTemplate")
-local IWin_Settings = {
-	["rageTimeToReserveBuffer"] = 1.5,
-	["ragePerSecondPrediction"] = 10, -- change it to match your gear and buffs
-	["outOfRaidCombatLength"] = 20,
-	["playerToNPCHealthRatio"] = 0.75,
-}
-local IWin_CombatVar = {
+IWin_CombatVar = {
 	["dodge"] = 0,
 	["reservedRage"] = 0,
 	["reservedRageStance"] = nil,
@@ -32,6 +26,14 @@ IWin:RegisterEvent("ADDON_LOADED")
 IWin:SetScript("OnEvent", function()
 	if event == "ADDON_LOADED" and arg1 == "IWinDruid" then
 		DEFAULT_CHAT_FRAME:AddMessage("|cff0066ff IWinDruid system loaded.|r")
+		if IWin_Druid == nil then IWin_Druid = {} end
+		if IWin_Druid["rageTimeToReserveBuffer"] == nil then IWin_Druid["rageTimeToReserveBuffer"] = 1.5 end
+		if IWin_Druid["energyTimeToReserveBuffer"] == nil then IWin_Druid["energyTimeToReserveBuffer"] = 1.5 end
+		if IWin_Druid["ragePerSecondPrediction"] == nil then IWin_Druid["ragePerSecondPrediction"] = 10 end
+		if IWin_Druid["energyPerSecondPrediction"] == nil then IWin_Druid["energyPerSecondPrediction"] = 10 end
+		if IWin_Druid["outOfRaidCombatLength"] == nil then IWin_Druid["outOfRaidCombatLength"] = 25 end
+		if IWin_Druid["playerToNPCHealthRatio"] == nil then IWin_Druid["playerToNPCHealthRatio"] = 0.75 end
+		if IWin_Druid["frontShred"] == nil then IWin_Druid["frontShred"] = "off" end
 		IWin.hasSuperwow = SetAutoloot and true or false
 		IWin:UnregisterEvent("ADDON_LOADED")
 	elseif event == "CHAT_MSG_COMBAT_SELF_MISSES" or event == "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF" then
@@ -50,6 +52,13 @@ end
 IWin_RageCost = {
 	["Demoralizing Roar"] = 10,
 	["Maul"] = 15 - IWin:GetTalentRank(2, 1),
+	["Swipe"] = 15,
+}
+
+IWin_EnergyCost = {
+	["Claw"] = 40,
+	["Rip"] = 30,
+	["Shred"] = 60,
 }
 
 IWin_Taunt = {
@@ -59,6 +68,13 @@ IWin_Taunt = {
 	"Growl",
 	"Challenging Roar",
 	"Hand of Reckoning",
+}
+
+IWin_Root = {
+	"Net",
+	"Ret",
+	"Web Explosion",
+	"Hooked Net",
 }
 
 ---- Functions ----
@@ -209,12 +225,12 @@ end
 
 function IWin:GetTimeToDie()
 	local ttd = 0
-	if UnitInRaid("player") then
+	if UnitInRaid("player") or UnitIsPVP("target") then
 		ttd = 999
-	elseif GetNumPartyMembers() ~= 0 then
-		ttd = UnitHealth("target") / UnitHealthMax("player") * IWin_Settings["playerToNPCHealthRatio"] * IWin_Settings["outOfRaidCombatLength"] / GetNumPartyMembers()
+	elseif GetNumPartyMembers ~= 0 then
+		ttd = UnitHealth("target") / UnitHealthMax("player") * IWin_Druid["playerToNPCHealthRatio"] * IWin_Druid["outOfRaidCombatLength"] / GetNumPartyMembers() * 2
 	else
-		ttd = UnitHealth("target") / UnitHealthMax("player") * IWin_Settings["playerToNPCHealthRatio"] * IWin_Settings["outOfRaidCombatLength"]
+		ttd = UnitHealth("target") / UnitHealthMax("player") * IWin_Druid["playerToNPCHealthRatio"] * IWin_Druid["outOfRaidCombatLength"]
 	end
 	return ttd
 end
@@ -227,6 +243,16 @@ function IWin:IsExecutePhase()
 	return IWin:GetHealthPercent("target") <= 0.2
 end
 
+function IWin:IsInRange(spell)
+	if not IsSpellInRange
+		or not spell
+		or not IWin:IsSpellLearnt(spell) then
+        	return CheckInteractDistance("target", 3) ~= nil
+	else
+		return IsSpellInRange(spell, "target") == 1
+	end
+end
+
 function IWin:IsRageAvailable(spell)
 	local rageRequired = IWin_RageCost[spell] + IWin_CombatVar["reservedRage"]
 	return UnitMana("player") >= rageRequired
@@ -234,14 +260,6 @@ end
 
 function IWin:IsRageCostAvailable(spell)
 	return UnitMana("player") >= IWin_RageCost[spell]
-end
-
-function IWin:IsInRange(spell)
-	if not IsSpellInRange then
-        return CheckInteractDistance("target", 3) ~= nil
-	else
-		return IsSpellInRange(spell, "target") == 1
-	end
 end
 
 function IWin:GetRageToReserve(spell, trigger, unit)
@@ -254,12 +272,12 @@ function IWin:GetRageToReserve(spell, trigger, unit)
 		spellTriggerTime = IWin:GetBuffRemaining(unit, spell) or 0
 	end
 	local reservedRageTime = 0
-	if IWin_Settings["ragePerSecondPrediction"] > 0 then
-		reservedRageTime = IWin_CombatVar["reservedRage"] / IWin_Settings["ragePerSecondPrediction"]
+	if IWin_Druid["ragePerSecondPrediction"] > 0 then
+		reservedRageTime = IWin_CombatVar["reservedRage"] / IWin_Druid["ragePerSecondPrediction"]
 	end
-	local timeToReserveRage = math.max(0, spellTriggerTime - IWin_Settings["rageTimeToReserveBuffer"] - reservedRageTime)
+	local timeToReserveRage = math.max(0, spellTriggerTime - IWin_Druid["rageTimeToReserveBuffer"] - reservedRageTime)
 	if trigger == "partybuff" or IWin:IsSpellLearnt(spell) then
-		return math.max(0, IWin_RageCost[spell] - IWin_Settings["ragePerSecondPrediction"] * timeToReserveRage)
+		return math.max(0, IWin_RageCost[spell] - IWin_Druid["ragePerSecondPrediction"] * timeToReserveRage)
 	end
 	return 0
 end
@@ -272,12 +290,41 @@ function IWin:SetReservedRage(spell, trigger, unit)
 	IWin_CombatVar["reservedRage"] = IWin_CombatVar["reservedRage"] + IWin:GetRageToReserve(spell, trigger, unit)
 end
 
-function IWin:IsInRange(spell)
-	if not IsSpellInRange then
-        return CheckInteractDistance("target", 3)
-	else
-		return IsSpellInRange(spell, "target")
+function IWin:IsEnergyAvailable(spell)
+	local energyRequired = IWin_EnergyCost[spell] + IWin_CombatVar["reservedEnergy"]
+	return UnitMana("player") >= energyRequired
+end
+
+function IWin:IsEnergyCostAvailable(spell)
+	return UnitMana("player") >= IWin_EnergyCost[spell]
+end
+
+function IWin:GetEnergyToReserve(spell, trigger, unit)
+	local spellTriggerTime = 0
+	if trigger == "nocooldown" then
+		return IWin_EnergyCost[spell]
+	elseif trigger == "cooldown" then
+		spellTriggerTime = IWin:GetCooldownRemaining(spell) or 0
+	elseif trigger == "buff" or trigger == "partybuff" then
+		spellTriggerTime = IWin:GetBuffRemaining(unit, spell) or 0
 	end
+	local reservedEnergyTime = 0
+	if IWin_Druid["energyPerSecondPrediction"] > 0 then
+		reservedEnergyTime = IWin_CombatVar["reservedEnergy"] / IWin_Druid["energyPerSecondPrediction"]
+	end
+	local timeToReserveEnergy = math.max(0, spellTriggerTime - IWin_Druid["energyTimeToReserveBuffer"] - reservedEnergyTime)
+	if trigger == "partybuff" or IWin:IsSpellLearnt(spell) then
+		return math.max(0, IWin_EnergyCost[spell] - IWin_Druid["energyPerSecondPrediction"] * timeToReserveEnergy)
+	end
+	return 0
+end
+
+function IWin:IsTimeToReserveEnergy(spell, trigger, unit)
+	return IWin:GetEnergyToReserve(spell, trigger, unit) ~= 0
+end
+
+function IWin:SetReservedEnergy(spell, trigger, unit)
+	IWin_CombatVar["reservedEnergy"] = IWin_CombatVar["reservedEnergy"] + IWin:GetEnergyToReserve(spell, trigger, unit)
 end
 
 function IWin:IsTanking()
@@ -302,13 +349,6 @@ IWin_UnitClassification = {
 function IWin:IsElite()
 	local classification = UnitClassification("target")
 	return IWin_UnitClassification[classification]
-end
-
-function IWin:IsRageReservedStance(stance)
-	if IWin_CombatVar["reservedRageStance"] then
-		return IWin_CombatVar["reservedRageStance"] == stance
-	end
-	return true
 end
 
 function IWin:IsTaunted()
@@ -350,14 +390,14 @@ function IWin:MarkSkull()
 	if UnitExists("target")
 		and GetRaidTargetIndex("target") ~= 8
 		and not UnitIsFriend("player", "target")
-		and not UnitInRaid("player") then
+		and not UnitInRaid("player")
+		and GetNumPartyMembers() ~= 0 then
 			SetRaidTarget("target", 8)
 	end
 end
 
 function IWin:CancelPlayerBuff(spell)
 	local index = IWin:GetBuffIndex("player", spell)
-	DEFAULT_CHAT_FRAME:AddMessage(index)
 	if index then
 		CancelPlayerBuff(index)
 	end
@@ -368,18 +408,47 @@ function IWin:CancelForm()
 	IWin:CancelPlayerBuff("Cat Form")
 end
 
+function IWin:CancelRoot()
+	if not IWin:IsInRange() then
+		for root in IWin_Root do
+			if IWin:IsBuffActive("player", IWin_Root[root]) then
+				IWin:CancelPlayerBuff("Bear Form")
+				IWin:CancelPlayerBuff("Cat Form")
+				break
+			end
+		end
+	end
+end
+
 ---- Class Actions ----
 function IWin:BearForm()
 	if IWin:IsSpellLearnt("Bear Form")
-		and not IWin:IsStanceActive("Bear Form") then
+		and not IWin:IsStanceActive("Bear Form")
+		and IWin_CombatVar["queue"] then
 			Cast("Bear Form")
+	end
+end
+
+function IWin:CatForm()
+	if IWin:IsSpellLearnt("Cat Form")
+		and not IWin:IsStanceActive("Cat Form")
+		and IWin_CombatVar["queue"] then
+			Cast("Cat Form")
+	end
+end
+
+function IWin:Claw()
+	if IWin:IsSpellLearnt("Claw")
+		and IWin:IsStanceActive("Cat Form")
+		and IWin:IsEnergyAvailable("Claw") then
+			Cast("Claw")
 	end
 end
 
 function IWin:DemoralizingRoar()
 	if IWin:IsSpellLearnt("Demoralizing Roar")
 		and IWin:IsRageAvailable("Demoralizing Roar")
-		and IWin:IsInRange("Growl")
+		and IWin:IsInRange()
 		and not IWin:IsBuffActive("target", "Demoralizing Roar")
 		and IWin:GetTimeToDie() > 10 then
 			Cast("Demoralizing Roar")
@@ -438,6 +507,55 @@ function IWin:Moonfire()
 	end
 end
 
+function IWin:Rip()
+	if IWin:IsSpellLearnt("Rip")
+		and IWin:IsStanceActive("Cat Form")
+		and IWin:IsEnergyAvailable("Rip")
+		and not IWin:IsBuffActive("target","Rip")
+		and GetComboPoints() > 2
+		and not (
+					UnitCreatureType("target") == "undead"
+					or UnitCreatureType("target") == "mechanical"
+					or UnitCreatureType("target") == "elemental"
+				) then
+			Cast("Rip")
+	end
+end
+
+function IWin:SetReservedEnergyRip()
+	if GetComboPoints() > 2
+		and not (
+					UnitCreatureType("target") == "undead"
+					or UnitCreatureType("target") == "mechanical"
+					or UnitCreatureType("target") == "elemental"
+				) then
+			IWin:SetReservedEnergy("Rip", "debuff", "target")
+	end
+end
+
+function IWin:Shred()
+	if IWin:IsSpellLearnt("Shred")
+		and IWin:IsStanceActive("Cat Form")
+		and IWin:IsEnergyAvailable("Shred")
+		and IWin_Druid["frontShred"] == "on" then
+			Cast("Shred")
+	end
+end
+
+function IWin:SetReservedEnergyShred()
+	if IWin_Druid["frontShred"] == "on" then
+		IWin:SetReservedEnergy("Shred", "nocooldown")
+	end
+end
+
+function IWin:Swipe()
+	if IWin:IsSpellLearnt("Swipe")
+		and IWin:IsStanceActive("Bear Form")
+		and IWin:IsRageAvailable("Swipe") then
+			Cast("Swipe")
+	end
+end
+
 function IWin:Thorns()
 	if IWin:IsSpellLearnt("Thorns")
 		and IWin_CombatVar["queue"]
@@ -473,11 +591,36 @@ function SlashCmdList.IDEBUG()
 	IWin:IsTaunted()
 end
 
+---- commands ----
+SLASH_IWIN1 = "/iwin"
+function SlashCmdList.IWIN(command)
+	if not command then return end
+	local arguments = {}
+	for token in string.gfind(command, "%S+") do
+		table.insert(arguments, token)
+	end
+	if arguments[1] == "frontshred"then
+		if arguments[2] ~= "on"
+			and arguments[2] ~= "off"
+			and arguments[2] ~= nil then
+				DEFAULT_CHAT_FRAME:AddMessage("Unkown parameter. Possible values: on, off.")
+				return
+		end
+	end
+    if arguments[1] == "frontshred" then
+        IWin_Druid["frontShred"] = arguments[2]
+	    DEFAULT_CHAT_FRAME:AddMessage("Front Shred: " .. IWin_Druid["frontShred"])
+	else
+		DEFAULT_CHAT_FRAME:AddMessage("Usage:")
+		DEFAULT_CHAT_FRAME:AddMessage(" /iwin : Current setup")
+		DEFAULT_CHAT_FRAME:AddMessage(" /iwin frontshred [" .. IWin_Druid["frontShred"] .. "] : Setup for Front Shredding")
+    end
+end
+
 ---- iblast button ----
 SLASH_IBLAST1 = '/iblast'
 function SlashCmdList.IBLAST()
 	IWin_CombatVar["reservedRage"] = 0
-	IWin_CombatVar["reservedRageStance"] = nil
 	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
 	IWin:StartAttack()
@@ -492,7 +635,6 @@ end
 SLASH_ISTORM1 = '/istorm'
 function SlashCmdList.ISTORM()
 	IWin_CombatVar["reservedRage"] = 0
-	IWin_CombatVar["reservedRageStance"] = nil
 	IWin:TargetEnemy()
 	IWin:StartAttack()
 end
@@ -500,18 +642,27 @@ end
 ---- iruetoo button ----
 SLASH_IRUETOO1 = '/iruetoo'
 function SlashCmdList.IRUETOO()
-	IWin_CombatVar["reservedRage"] = 0
-	IWin_CombatVar["reservedRageStance"] = nil
+	IWin_CombatVar["reservedEnergy"] = 0
+	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
-
+	IWin:MarkOfTheWild()
+	IWin:Thorns()
+	IWin:CancelRoot()
+	IWin:CatForm()
+	IWin:Rip()
+	IWin:SetReservedEnergyRip()
+	IWin:Shred()
+	IWin:SetReservedEnergyShred()
+	IWin:Claw()
+	IWin:SetReservedEnergy("Claw", "nocooldown")
 	IWin:StartAttack()
 end
 
 ---- isacat button ----
 SLASH_ISACAT1 = '/isacat'
 function SlashCmdList.ISACAT()
-	IWin_CombatVar["reservedRage"] = 0
-	IWin_CombatVar["reservedRageStance"] = nil
+	IWin_CombatVar["reservedEnergy"] = 0
+	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
 
 	IWin:StartAttack()
@@ -521,16 +672,18 @@ end
 SLASH_ITANK1 = '/itank'
 function SlashCmdList.ITANK()
 	IWin_CombatVar["reservedRage"] = 0
-	IWin_CombatVar["reservedRageStance"] = nil
 	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
 	IWin:MarkSkull()
 	IWin:MarkOfTheWild()
 	IWin:Thorns()
+	IWin:CancelRoot()
 	IWin:BearForm()
 	IWin:DemoralizingRoar()
 	IWin:SetReservedRage("Demoralizing Roar", "debuff", "target")
 	IWin:Enrage()
+	IWin:Swipe()
+	IWin:SetReservedRage("Swipe", "nocooldown")
 	IWin:Maul()
 	IWin:StartAttack()
 end
@@ -539,7 +692,6 @@ end
 SLASH_IHODOR1 = '/ihodor'
 function SlashCmdList.IHODOR()
 	IWin_CombatVar["reservedRage"] = 0
-	IWin_CombatVar["reservedRageStance"] = nil
 	IWin_CombatVar["queue"] = true
 	IWin:TargetEnemy()
 	IWin:MarkSkull()
@@ -548,6 +700,8 @@ function SlashCmdList.IHODOR()
 	IWin:BearForm()
 	IWin:DemoralizingRoar()
 	IWin:SetReservedRage("Demoralizing Roar", "debuff", "target")
+	IWin:Swipe()
+	IWin:SetReservedRage("Swipe", "nocooldown")
 	IWin:Maul()
 	IWin:StartAttack()
 end
@@ -559,15 +713,6 @@ function SlashCmdList.ICHASE()
 	IWin:Charge()
 	IWin:Intercept()
 	IWin:Hamstring()
-	IWin:StartAttack()
-end
-
----- ikick button ----
-SLASH_IKICK1 = '/ikick'
-function SlashCmdList.IKICK()
-	IWin:TargetEnemy()
-	IWin:ShieldBash()
-	IWin:Pummel()
 	IWin:StartAttack()
 end
 

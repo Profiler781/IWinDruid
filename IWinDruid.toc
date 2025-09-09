@@ -2,7 +2,7 @@
 ## Title: IWinDruid
 ## Notes: Smart macros for turtle druids
 ## Version: 0.3
-## SavedVariables: 
+## SavedVariables: IWin_Druid
 ## OptionalDeps: ShaguTweaks, pfUI
 
 IWinDruid.lua

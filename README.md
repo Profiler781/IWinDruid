@@ -3,6 +3,8 @@
 Smart macros for Turtle Druids v1.18.0. Make macros with commands. Put them on your action bars. Enjoy!
 /!\ IN DEVELOPMENT
 
+Discord: Agamemnoth#5566
+
 ## Commands
 
     /iblast      Single target caster rotation
@@ -14,6 +16,16 @@ Smart macros for Turtle Druids v1.18.0. Make macros with commands. Put them on y
     /ichase      Stick to your target TODO
     /ikick       Kick TODO
     /itaunt      Growl if the target is not under another taunt effect
+
+## Setup commands
+
+    /iwin                             Current setup
+    /iwin frontshred <toggle>         Setup for Front Shredding
+
+toggle possible values: on, off.
+
+Example: /iwin frontshred on
+=> Will setup shred usable in rotations while in front of target. You must strafe through the mob and spam the command.
 
 ## Required Mods & Addons
 Mandatory Mods:
