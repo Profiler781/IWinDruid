@@ -83,6 +83,38 @@ IWin_Root = {
 	"Entangling Roots",
 	"Frost Nova",
 	"Encasing Web",
+	"Web Spray",
+	"Enveloping Web",
+}
+
+IWin_DrinkVendor = {
+	["Hyjal Nectar"] = 55,
+	["Morning Glory Dew"] = 45,
+	["Freshly-Squeezed Lemonade"] = 45,
+	["Bottled Winterspring Water"] = 35,
+	["Moonberry Juice"] = 35,
+	["Enchanted Water"] = 25,
+	["Goldthorn Tea"] = 25,
+	["Green Garden Tea"] = 25,
+	["Sweet Nectar"] = 25,
+	["Bubbling Water"] = 15,
+	["Fizzy Faire Drink"] = 15,
+	["Melon Juice"] = 15,
+	["Blended Bean Brew"] = 5,
+	["Ice Cold Milk"] = 5,
+	["Kaja'Cola"] = 1,
+	["Refreshing Spring Water"] = 1,
+	["Sun-Parched Waterskin"] = 1,
+}
+
+IWin_DrinkConjured = {
+	["Conjured Crystal Water"] = 55,
+	["Conjured Sparkling Water"] = 45,
+	["Conjured Mineral Water"] = 35,
+	["Conjured Spring Water"] = 25,
+	["Conjured Purified Water"] = 15,
+	["Conjured Fresh Water"] = 5,
+	["Conjured Water"] = 1,
 }
 
 ---- Functions ----
@@ -263,11 +295,11 @@ end
 
 function IWin:IsRageAvailable(spell)
 	local rageRequired = IWin_RageCost[spell] + IWin_CombatVar["reservedRage"]
-	return UnitMana("player") >= rageRequired
+	return UnitMana("player") >= rageRequired or IWin:IsBuffActive("player", "Clearcasting")
 end
 
 function IWin:IsRageCostAvailable(spell)
-	return UnitMana("player") >= IWin_RageCost[spell]
+	return UnitMana("player") >= IWin_RageCost[spell] or IWin:IsBuffActive("player", "Clearcasting")
 end
 
 function IWin:GetRageToReserve(spell, trigger, unit)
@@ -300,11 +332,11 @@ end
 
 function IWin:IsEnergyAvailable(spell)
 	local energyRequired = IWin_EnergyCost[spell] + IWin_CombatVar["reservedEnergy"]
-	return UnitMana("player") >= energyRequired
+	return UnitMana("player") >= energyRequired or IWin:IsBuffActive("player", "Clearcasting")
 end
 
 function IWin:IsEnergyCostAvailable(spell)
-	return UnitMana("player") >= IWin_EnergyCost[spell]
+	return UnitMana("player") >= IWin_EnergyCost[spell] or IWin:IsBuffActive("player", "Clearcasting")
 end
 
 function IWin:GetEnergyToReserve(spell, trigger, unit)
@@ -419,6 +451,7 @@ end
 
 function IWin:CancelForm()
 	IWin:CancelPlayerBuff("Bear Form")
+	IWin:CancelPlayerBuff("Dire Bear Form")
 	IWin:CancelPlayerBuff("Cat Form")
 end
 
@@ -434,9 +467,51 @@ function IWin:CancelRoot()
 	end
 end
 
+function IWin:CancelSalvation()
+	IWin:CancelPlayerBuff("Blessing of Salvation")
+	IWin:CancelPlayerBuff("Greater Blessing of Salvation")
+end
+
+function IWin:UseItem(item)
+	for bag = 0, 4 do
+		for slot = 1, GetContainerNumSlots(bag) do
+			local itemName = GetContainerItemLink(bag, slot)
+			if itemName and strfind(itemName,item) then
+				UseContainerItem(bag, slot)
+			end
+		end
+	end
+end
+
+function IWin:UseItemBuff(item, buff)
+	if not IWin:IsBuffActive("player", buff) then
+		IWin:UseItem(item)
+	end
+end
+
+function IWin:UseDrinkItem()
+	local playerLevel = UnitLevel("player")
+	for drinkItem in IWin_DrinkConjured do
+		if IWin:IsBuffActive("player", "Drink") then break end
+		if playerLevel >= IWin_DrinkConjured[drinkItem] then
+			IWin:UseItem(drinkItem)
+		end
+	end
+	for drinkItem in IWin_DrinkVendor do
+		if IWin:IsBuffActive("player", "Drink") then break end
+		if playerLevel >= IWin_DrinkVendor[drinkItem] then
+			IWin:UseItem(drinkItem)
+		end
+	end
+end
+
 ---- Class Actions ----
 function IWin:BearForm()
-	if IWin:IsSpellLearnt("Bear Form")
+	if IWin:IsSpellLearnt("Dire Bear Form")
+		and not IWin:IsStanceActive("Dire Bear Form")
+		and IWin_CombatVar["queue"] then
+			Cast("Dire Bear Form")
+	elseif IWin:IsSpellLearnt("Bear Form")
 		and not IWin:IsStanceActive("Bear Form")
 		and IWin_CombatVar["queue"] then
 			Cast("Bear Form")
@@ -500,13 +575,34 @@ function IWin:FerociousBite()
 	end
 end
 
+function IWin:SetReservedEnergyFerocious()
+	if not (
+				not IWin:IsBuffActive("target","Rip")
+				and GetComboPoints() > 2
+				and IWin:GetTimeToDie() > 10
+				and not (
+							UnitCreatureType("target") == "Undead"
+							or UnitCreatureType("target") == "Mechanical"
+							or UnitCreatureType("target") == "Elemental"
+						)
+			)
+		and GetComboPoints() > 3 then
+		IWin:SetReservedEnergy("Ferocious Bite", "nocooldown")
+	end
+end
+
 function IWin:Growl()
 	if IWin:IsSpellLearnt("Growl")
 		and not IWin:IsTanking()
 		and not IWin:IsOnCooldown("Growl")
 		and not IWin:IsTaunted() then
-			if not IWin:IsStanceActive("Bear Form") then
-				Cast("Bear Form")
+			if IWin:IsSpellLearnt("Dire Bear Form")
+				and not IWin:IsStanceActive("Dire Bear Form") then
+					Cast("Dire Bear Form")
+			elseif IWin:IsSpellLearnt("Bear Form")
+				and not IWin:IsSpellLearnt("Dire Bear Form")
+				and not IWin:IsStanceActive("Bear Form") then
+					Cast("Bear Form")
 			else
 				Cast("Growl")
 			end
@@ -527,7 +623,10 @@ end
 
 function IWin:Maul()
 	if IWin:IsSpellLearnt("Maul")
-		and IWin:IsStanceActive("Bear Form") then
+		and (
+				IWin:IsStanceActive("Bear Form")
+				or IWin:IsStanceActive("Dire Bear Form")
+			) then
 			if IWin:IsRageAvailable("Maul") then
 				Cast("Maul")
 			else
@@ -565,7 +664,7 @@ function IWin:SetReservedEnergyRake()
 				or UnitCreatureType("target") == "Mechanical"
 				or UnitCreatureType("target") == "Elemental"
 			) then
-			IWin:SetReservedEnergy("Rake", "debuff", "target")
+			IWin:SetReservedEnergy("Rake", "buff", "target")
 	end
 end
 
@@ -625,7 +724,10 @@ end
 
 function IWin:Swipe()
 	if IWin:IsSpellLearnt("Swipe")
-		and IWin:IsStanceActive("Bear Form")
+		and (
+				IWin:IsStanceActive("Bear Form")
+				or IWin:IsStanceActive("Dire Bear Form")
+			)
 		and IWin:IsRageAvailable("Swipe") then
 			Cast("Swipe")
 	end
@@ -646,6 +748,7 @@ end
 function IWin:TigersFury()
 	if IWin:IsSpellLearnt("Tiger's Fury")
 		and IWin:IsStanceActive("Cat Form")
+		and IWin:GetTalentRank(2,12) ~= 0
 		and IWin:IsEnergyAvailable("Tiger's Fury")
 		and not IWin:IsBuffActive("player", "Tiger's Fury")
 		and IWin:GetTimeToDie() > 6 then
@@ -654,8 +757,9 @@ function IWin:TigersFury()
 end
 
 function IWin:SetReservedEnergyTigersFury()
-	if IWin:GetTimeToDie() > 6 then
-		IWin:SetReservedEnergy("Tiger's Fury", "buff", "player")
+	if IWin:GetTimeToDie() > 6
+		and IWin:GetTalentRank(2,12) ~= 0 then
+			IWin:SetReservedEnergy("Tiger's Fury", "buff", "player")
 	end
 end
 
@@ -743,16 +847,23 @@ function SlashCmdList.IRUETOO()
 	IWin:CatForm()
 	IWin:TigersFury()
 	IWin:SetReservedEnergyTigersFury()
+	--DEFAULT_CHAT_FRAME:AddMessage("tf"..IWin_CombatVar["reservedEnergy"])
 	IWin:FaerieFireFeral()
 	IWin:Rip()
-	IWin:FerociousBite()
 	IWin:SetReservedEnergyRip()
+	--DEFAULT_CHAT_FRAME:AddMessage("rip"..IWin_CombatVar["reservedEnergy"])
+	IWin:FerociousBite()
+	IWin:SetReservedEnergyFerocious()
+	--DEFAULT_CHAT_FRAME:AddMessage("fb"..IWin_CombatVar["reservedEnergy"])
 	IWin:Rake()
 	IWin:SetReservedEnergyRake()
+	--DEFAULT_CHAT_FRAME:AddMessage("rake"..IWin_CombatVar["reservedEnergy"])
 	IWin:Shred()
 	IWin:SetReservedEnergyShred()
+	--DEFAULT_CHAT_FRAME:AddMessage("shred"..IWin_CombatVar["reservedEnergy"])
 	IWin:Claw()
 	IWin:SetReservedEnergy("Claw", "nocooldown")
+	--DEFAULT_CHAT_FRAME:AddMessage("claw"..IWin_CombatVar["reservedEnergy"])
 	IWin:StartAttack()
 end
 
@@ -779,7 +890,7 @@ function SlashCmdList.ITANK()
 	IWin:BearForm()
 	IWin:FaerieFireFeral()
 	IWin:DemoralizingRoar()
-	IWin:SetReservedRage("Demoralizing Roar", "debuff", "target")
+	IWin:SetReservedRage("Demoralizing Roar", "buff", "target")
 	IWin:Enrage()
 	IWin:Swipe()
 	IWin:SetReservedRage("Swipe", "nocooldown")
@@ -798,7 +909,7 @@ function SlashCmdList.IHODOR()
 	IWin:Thorns()
 	IWin:BearForm()
 	IWin:DemoralizingRoar()
-	IWin:SetReservedRage("Demoralizing Roar", "debuff", "target")
+	IWin:SetReservedRage("Demoralizing Roar", "buff", "target")
 	IWin:Swipe()
 	IWin:SetReservedRage("Swipe", "nocooldown")
 	IWin:FaerieFireFeral()
