@@ -10,14 +10,18 @@ if UnitClass("player") ~= "Druid" then return end
 ---- Loading ----
 IWin = CreateFrame("frame",nil,UIParent)
 IWin.t = CreateFrame("GameTooltip", "IWin_T", UIParent, "GameTooltipTemplate")
+IWin_T:SetOwner(WorldFrame, "ANCHOR_NONE")
 IWin_CombatVar = {
 	["reservedRage"] = 0,
 	["reservedEnergy"] = 0,
 	["queue"] = true,
 	["lastMoonkinSpell"] = "Starfire",
 	["lastMoonkinSpellTime"] = 0,
+	["energyPerSecondPrediction"] = 0,
 }
 local Cast = CastSpellByName
+local GCD = 1.5
+local GCDCat = 1
 
 ---- Event Register ----
 IWin:RegisterEvent("ADDON_LOADED")
@@ -34,8 +38,8 @@ IWin:SetScript("OnEvent", function()
 		if IWin_Druid["playerToNPCHealthRatio"] == nil then IWin_Druid["playerToNPCHealthRatio"] = 0.75 end
 		if IWin_Druid["frontShred"] == nil then IWin_Druid["frontShred"] = "off" end
 		IWin.hasSuperwow = SetAutoloot and true or false
-	elseif event == "ADDON_LOADED" and (arg1 == "SuperCleveRoidMacros" or arg1 == "pfUI" or arg1 == "ShaguTweaks" or arg1 == "IWinPaladin") then
-		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff or pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
+	elseif event == "ADDON_LOADED" and (arg1 == "SuperCleveRoidMacros" or arg1 == "pfUI" or arg1 == "ShaguTweaks" or arg1 == "IWinDruid") then
+		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff-- or pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
 	elseif event == "SPELLCAST_START" and (arg1 == "Wrath" or arg1 == "Starfire") then
 		IWin_CombatVar["lastMoonkinSpell"] = arg1
 		IWin_CombatVar["lastMoonkinSpellTime"] = GetTime() + (arg2 / 1000)
@@ -86,7 +90,7 @@ end
 
 IWin_CastTime = {
 	["Starfire"] = 3.5 - IWin:GetStarfireCastTimeReduction(),
-	["Wrath"] = 2 - IWin:GetTalentRank(1, 1),
+	["Wrath"] = 2 - IWin:GetTalentRank(1, 1) * 0.1,
 }
 
 IWin_Taunt = {
@@ -151,95 +155,85 @@ IWin_DrinkConjured = {
 }
 
 ---- Functions ----
---[[]]
 function IWin:GetBuffIndex(unit, spell)
-	if unit == "player" then
-		if not IWin.hasSuperwow then
-	    	DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFFbalakethelock's SuperWoW|r required:")
-	        DEFAULT_CHAT_FRAME:AddMessage("https://github.com/balakethelock/SuperWoW")
-	    	return 0
+	local index = 1
+	while UnitBuff(unit, index) do
+		IWin_T:ClearLines()
+		IWin_T:SetUnitBuff(unit, index)
+		local tooltipText = IWin_TTextLeft1:GetText()
+		if spell and tooltipText and string.find(tooltipText, spell) then
+			return index
 		end
-	    local index = 0
-	    while true do
-	        spellID = GetPlayerBuffID(index)
-	        if not spellID then break end
-	        if spell == SpellInfo(spellID) then
-	        	return index
-	        end
-	        index = index + 1
-	    end
-	else
-		local index = 1
-		while UnitBuff(unit, index) do
-			IWin_T:SetOwner(WorldFrame, "ANCHOR_NONE")
-			IWin_T:ClearLines()
-			IWin_T:SetUnitBuff(unit, index)
-			local buffName = IWin_TTextLeft1:GetText()
-			if buffName == spell then
-				return index
-			end
-			index = index + 1
-		end
+		index = index + 1
 	end
 	return nil
 end
 
 function IWin:GetDebuffIndex(unit, spell)
-	index = 1
+	local index = 1
 	while UnitDebuff(unit, index) do
-		IWin_T:SetOwner(WorldFrame, "ANCHOR_NONE")
 		IWin_T:ClearLines()
 		IWin_T:SetUnitDebuff(unit, index)
-		local buffName = IWin_TTextLeft1:GetText()
-		if buffName == spell then 
+		local tooltipText = IWin_TTextLeft1:GetText()
+		if spell and tooltipText and string.find(tooltipText, spell) then 
 			return index
 		end
 		index = index + 1
 	end	
 	return nil
 end
---]]
 
-function IWin:GetBuffStack(unit, spell)
+function IWin:GetBuffRemaining(unit, spell, owner)
+	-- Debuff scan
+	for index = 1, 32 do
+	    local effect, _, texture, stacks, dtype, duration, timeleft, caster = IWin.libdebuff:UnitDebuff(unit, index)
+	    if not effect then break end
+	    if effect == spell and ((not owner) or (caster == owner)) then
+	        return timeleft
+	    end
+	end
+	-- Buff scan only for player
+	for index = 0, 31 do
+        spellID = GetPlayerBuffID(index)
+        if not spellID then break end
+        if spell == SpellInfo(spellID) then
+        	local timeLeft = GetPlayerBuffTimeLeft(index)
+        	if timeLeft ~= 0 then
+        		return timeLeft
+        	else
+        		return 9999
+        	end
+        end
+    end
+	-- Not found
+	return 0
+end
+
+function IWin:GetBuffStack(unit, spell, owner)
+	-- Debuff scan
+	for index = 1, 32 do
+	    local effect, _, texture, stacks, dtype, duration, timeleft, caster = IWin.libdebuff:UnitDebuff(unit, index)
+	    if not effect then break end
+	    if effect == spell and ((not owner) or (caster == owner)) then
+	        return stacks
+	    end
+	end
+	-- Buff scan
 	local index = IWin:GetBuffIndex(unit, spell)
 	if index then
 		local _, stack = UnitBuff(unit, index)
 		return stack or 0
 	end
-	local index = IWin:GetDebuffIndex(unit, spell)
-	if index then
-		local _, stack = UnitDebuff(unit, index)
-		return stack or 0
-	end
+	-- Not found
 	return 0
 end
 
-function IWin:IsBuffStack(unit, spell, stack)
-	return IWin:GetBuffStack(unit, spell) == stack
+function IWin:IsBuffStack(unit, spell, stack, owner)
+	return IWin:GetBuffStack(unit, spell, owner) == stack
 end
 
-function IWin:IsBuffActive(unit, spell)
-	return IWin:GetBuffRemaining(unit, spell) ~= 0
-end
-
-function IWin:GetBuffRemaining(unit, spell)
-	if unit == "player" then
-		local index = IWin:GetBuffIndex(unit, spell)
-		if index then
-			return GetPlayerBuffTimeLeft(index)
-		end
-		local index = IWin:GetDebuffIndex(unit, spell)
-		if index then
-			return GetPlayerBuffTimeLeft(index)
-		end
-	elseif unit == "target" then
-		local index = IWin:GetDebuffIndex(unit, spell)
-		if index then
-			local _, _, _, _, _, _, timeleft = IWin.libdebuff:UnitDebuff("target", index)
-			return timeleft
-		end
-	end
-	return 0
+function IWin:IsBuffActive(unit, spell, owner)
+	return IWin:GetBuffRemaining(unit, spell, owner) ~= 0
 end
 
 function IWin:GetCooldownRemaining(spell)
@@ -313,11 +307,16 @@ function IWin:IsExecutePhase()
 	return IWin:GetHealthPercent("target") <= 0.2
 end
 
-function IWin:IsInRange(spell)
+function IWin:IsInRange(spell, distance)
+	if not UnitExists("target") then return false end
 	if not IsSpellInRange
 		or not spell
 		or not IWin:IsSpellLearnt(spell) then
-        	return CheckInteractDistance("target", 3) ~= nil
+			if distance == "ranged" then
+				return not (CheckInteractDistance("target", 3) ~= nil)
+			else
+        		return CheckInteractDistance("target", 3) ~= nil
+        	end
 	else
 		return IsSpellInRange(spell, "target") == 1
 	end
@@ -325,6 +324,10 @@ end
 
 function IWin:IsRageAvailable(spell)
 	local rageRequired = IWin_RageCost[spell] + IWin_CombatVar["reservedRage"]
+	-- replacing auto attack will prevent getting rage from next swing. so rage gained is lower.
+	if spell == "Maul" then
+		rageRequired = rageRequired + IWin_Druid["ragePerSecondPrediction"]
+	end
 	return UnitMana("player") >= rageRequired or IWin:IsBuffActive("player", "Clearcasting")
 end
 
@@ -334,8 +337,12 @@ end
 
 function IWin:GetRageToReserve(spell, trigger, unit)
 	local spellTriggerTime = 0
+	local rageCost = IWin_RageCost[spell]
+	if spell == "Maul" then
+		rageCost = rageCost + IWin_Druid["ragePerSecondPrediction"]
+	end
 	if trigger == "nocooldown" then
-		return IWin_RageCost[spell]
+		return rageCost
 	elseif trigger == "cooldown" then
 		spellTriggerTime = IWin:GetCooldownRemaining(spell) or 0
 	elseif trigger == "buff" or trigger == "partybuff" then
@@ -347,7 +354,7 @@ function IWin:GetRageToReserve(spell, trigger, unit)
 	end
 	local timeToReserveRage = math.max(0, spellTriggerTime - IWin_Druid["rageTimeToReserveBuffer"] - reservedRageTime)
 	if trigger == "partybuff" or IWin:IsSpellLearnt(spell) then
-		return math.max(0, IWin_RageCost[spell] - IWin_Druid["ragePerSecondPrediction"] * timeToReserveRage)
+		return math.max(0, rageCost - IWin_Druid["ragePerSecondPrediction"] * timeToReserveRage)
 	end
 	return 0
 end
@@ -362,7 +369,7 @@ end
 
 function IWin:IsEnergyAvailable(spell)
 	local energyRequired = IWin_EnergyCost[spell] + IWin_CombatVar["reservedEnergy"]
-	return UnitMana("player") >= energyRequired or IWin:IsBuffActive("player", "Clearcasting")
+	return (UnitMana("player") >= energyRequired) or IWin:IsBuffActive("player", "Clearcasting") or (UnitMana("player") > (100 - IWin_CombatVar["energyPerSecondPrediction"] * 2))
 end
 
 function IWin:IsEnergyCostAvailable(spell)
@@ -371,12 +378,6 @@ end
 
 function IWin:GetEnergyToReserve(spell, trigger, unit)
 	local spellTriggerTime = 0
-	local energyPerSecondPrediction = 0
-	if IWin:IsBuffActive("player", "Tiger's Fury") then
-		energyPerSecondPrediction = IWin_Druid["energyPerSecondPrediction"] + 3.3
-	else
-		energyPerSecondPrediction = IWin_Druid["energyPerSecondPrediction"]
-	end
 	if trigger == "nocooldown" then
 		return IWin_EnergyCost[spell]
 	elseif trigger == "cooldown" then
@@ -385,12 +386,12 @@ function IWin:GetEnergyToReserve(spell, trigger, unit)
 		spellTriggerTime = IWin:GetBuffRemaining(unit, spell) or 0
 	end
 	local reservedEnergyTime = 0
-	if energyPerSecondPrediction > 0 then
-		reservedEnergyTime = IWin_CombatVar["reservedEnergy"] / energyPerSecondPrediction
+	if IWin_CombatVar["energyPerSecondPrediction"] > 0 then
+		reservedEnergyTime = IWin_CombatVar["reservedEnergy"] / IWin_CombatVar["energyPerSecondPrediction"]
 	end
 	local timeToReserveEnergy = math.max(0, spellTriggerTime - IWin_Druid["energyTimeToReserveBuffer"] - reservedEnergyTime)
 	if trigger == "partybuff" or IWin:IsSpellLearnt(spell) then
-		return math.max(0, IWin_EnergyCost[spell] - energyPerSecondPrediction * timeToReserveEnergy)
+		return math.max(0, IWin_EnergyCost[spell] - IWin_CombatVar["energyPerSecondPrediction"] * timeToReserveEnergy)
 	end
 	return 0
 end
@@ -498,7 +499,7 @@ function IWin:InitializeRotation()
     	return 0
 	end
 	if not IWin.libdebuff then
-		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff or pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
+		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff-- or pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
     	if not IWin.libdebuff then
 	    	DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFFSuperCleveRoidMacros|r (recommanded) or |cFF00FFFFpfUI|r or |cFF00FFFFShaguTweaks|r required:")
 	        DEFAULT_CHAT_FRAME:AddMessage("https://github.com/jrc13245/SuperCleveRoidMacros")
@@ -509,10 +510,20 @@ function IWin:InitializeRotation()
 	end
 	IWin_CombatVar["reservedRage"] = 0
 	IWin_CombatVar["reservedEnergy"] = 0
-	IWin_CombatVar["queueGCD"] = true
 	IWin_CombatVar["queue"] = true
 	if IWin_CombatVar["lastMoonkinSpellTime"] + 0.5 < GetTime() then
-		IWin_CombatVar["lastMoonkinSpell"] = "Starfire"
+		if not UnitExists("target") or UnitAffectingCombat("target") then
+			IWin_CombatVar["lastMoonkinSpell"] = "Starfire"
+		else
+			IWin_CombatVar["lastMoonkinSpell"] = "Wrath"
+		end
+	end
+	IWin_CombatVar["energyPerSecondPrediction"] = IWin_Druid["energyPerSecondPrediction"]
+	if IWin:IsBuffActive("player", "Tiger's Fury") then
+		IWin_CombatVar["energyPerSecondPrediction"] = IWin_CombatVar["energyPerSecondPrediction"] + 3.3
+	end
+	if IWin:IsBuffActive("player", "Berserk") then
+		IWin_CombatVar["energyPerSecondPrediction"] = IWin_CombatVar["energyPerSecondPrediction"] + IWin_Druid["energyPerSecondPrediction"]
 	end
 end
 
@@ -612,8 +623,17 @@ end
 function IWin:MarkOfTheWild()
 	if IWin:IsSpellLearnt("Mark of the Wild")
 		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Mark of the Wild")
 		and not (CheckInteractDistance("target", 4) ~= nil)
-		and IWin:GetBuffRemaining("player","Mark of the Wild") < 60
+		and (
+				(
+					IWin:GetBuffRemaining("player","Mark of the Wild") < 60
+					and not IWin:IsBuffActive("player","Gift of the Wild")
+				) or (
+					IWin:GetBuffRemaining("player","Gift of the Wild") < 60
+					and not IWin:IsBuffActive("player","Mark of the Wild")
+				)
+			)
 		and not UnitAffectingCombat("player") then
 			IWin_CombatVar["queue"] = false
 			IWin:CancelForm()
@@ -624,9 +644,11 @@ end
 function IWin:Thorns()
 	if IWin:IsSpellLearnt("Thorns")
 		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Thorns")
 		and not (CheckInteractDistance("target", 4) ~= nil)
 		and IWin:GetBuffRemaining("player","Thorns") < 60
-		and not UnitAffectingCombat("player") then
+		and not UnitAffectingCombat("player")
+		and GetNumPartyMembers() == 0 then
 			IWin_CombatVar["queue"] = false
 			IWin:CancelForm()
 			Cast("Thorns","player")
@@ -640,15 +662,19 @@ end
 ---- Feral Actions ----
 function IWin:FaerieFireFeral()
 	if IWin:IsSpellLearnt("Faerie Fire (Feral)")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Faerie Fire (Feral)")
 		and not IWin:IsBuffActive("target", "Faerie Fire (Feral)")
 		and (
 				IWin:IsStanceActive("Cat Form")
 				or IWin:IsStanceActive("Bear Form")
 				or IWin:IsStanceActive("Dire Bear Form")
 			) then
-			Cast("Faerie Fire (Feral)(Rank 3)")
-			Cast("Faerie Fire (Feral)(Rank 2)")
-			Cast("Faerie Fire (Feral)(Rank 1)")
+				IWin_CombatVar["queue"] = false
+				Cast("Faerie Fire (Feral)(Rank 4)")
+				Cast("Faerie Fire (Feral)(Rank 3)")
+				Cast("Faerie Fire (Feral)(Rank 2)")
+				Cast("Faerie Fire (Feral)(Rank 1)")
 	end
 end
 
@@ -656,21 +682,28 @@ end
 function IWin:BearForm()
 	if IWin:IsSpellLearnt("Dire Bear Form")
 		and not IWin:IsStanceActive("Dire Bear Form")
+		and not IWin:IsOnCooldown("Dire Bear Form")
 		and IWin_CombatVar["queue"] then
+			IWin_CombatVar["queue"] = false
 			Cast("Dire Bear Form")
 	elseif IWin:IsSpellLearnt("Bear Form")
 		and not IWin:IsStanceActive("Bear Form")
+		and not IWin:IsOnCooldown("Bear Form")
 		and IWin_CombatVar["queue"] then
+			IWin_CombatVar["queue"] = false
 			Cast("Bear Form")
 	end
 end
 
 function IWin:DemoralizingRoar()
 	if IWin:IsSpellLearnt("Demoralizing Roar")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Demoralizing Roar")
 		and IWin:IsRageAvailable("Demoralizing Roar")
 		and IWin:IsInRange()
 		and not IWin:IsBuffActive("target", "Demoralizing Roar")
 		and IWin:GetTimeToDie() > 10 then
+			IWin_CombatVar["queue"] = false
 			Cast("Demoralizing Roar")
 	end
 end
@@ -683,44 +716,46 @@ function IWin:Enrage()
 	end
 end
 
+function IWin:FeralCharge()
+	if IWin:IsSpellLearnt("Feral Charge")
+		and not IWin:IsOnCooldown("Feral Charge")
+		and IWin:IsInRange("Feral Charge","ranged") then
+			Cast("Feral Charge")
+	end
+end
+
 function IWin:Growl()
 	if IWin:IsSpellLearnt("Growl")
 		and not IWin:IsTanking()
 		and not IWin:IsOnCooldown("Growl")
 		and not IWin:IsTaunted() then
-			if IWin:IsSpellLearnt("Dire Bear Form")
-				and not IWin:IsStanceActive("Dire Bear Form") then
-					Cast("Dire Bear Form")
-			elseif IWin:IsSpellLearnt("Bear Form")
-				and not IWin:IsSpellLearnt("Dire Bear Form")
-				and not IWin:IsStanceActive("Bear Form") then
-					Cast("Bear Form")
-			else
-				Cast("Growl")
-			end
+			Cast("Growl")
 	end
 end
 
 function IWin:Maul()
-	if IWin:IsSpellLearnt("Maul")
-		and (
-				IWin:IsStanceActive("Bear Form")
-				or IWin:IsStanceActive("Dire Bear Form")
-			) then
-			if IWin:IsRageAvailable("Maul") then
-				Cast("Maul")
-			else
-				--SpellStopCasting()
-			end
+	if IWin:IsSpellLearnt("Maul") then
+		if IWin:IsRageAvailable("Maul") then
+			Cast("Maul")
+		else
+			--SpellStopCasting()
+		end
+	end
+end
+
+function IWin:SavageBite(queueTime)
+	if IWin:IsSpellLearnt("Savage Bite")
+		and IWin_CombatVar["queue"]
+		and IWin:GetCooldownRemaining("Savage Bite") < queueTime
+		and IWin:IsRageAvailable("Savage Bite") then
+			IWin_CombatVar["queue"] = false
+			Cast("Savage Bite")
 	end
 end
 
 function IWin:Swipe()
 	if IWin:IsSpellLearnt("Swipe")
-		and (
-				IWin:IsStanceActive("Bear Form")
-				or IWin:IsStanceActive("Dire Bear Form")
-			)
+		and not IWin:IsOnCooldown("Swipe")
 		and IWin:IsRageAvailable("Swipe") then
 			Cast("Swipe")
 	end
@@ -729,10 +764,12 @@ end
 ---- Cat Actions ----
 function IWin:BerserkCat()
 	if IWin:IsSpellLearnt("Berserk")
-		and IWin:IsStanceActive("Cat Form")
+		and IWin_CombatVar["queue"]
 		and not IWin:IsBlacklistFear()
 		and not IWin:IsOnCooldown("Berserk")
+		and UnitMana("player") <= 50
 		and UnitAffectingCombat("player") then
+			IWin_CombatVar["queue"] = false
 			Cast("Berserk")
 	end
 end
@@ -740,55 +777,58 @@ end
 function IWin:CatForm()
 	if IWin:IsSpellLearnt("Cat Form")
 		and not IWin:IsStanceActive("Cat Form")
+		and not IWin:IsOnCooldown("Cat Form")
 		and IWin_CombatVar["queue"] then
+			IWin_CombatVar["queue"] = false
 			Cast("Cat Form")
 	end
 end
 
 function IWin:Claw()
 	if IWin:IsSpellLearnt("Claw")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Claw")
 		and IWin:IsStanceActive("Cat Form")
 		and IWin:IsEnergyAvailable("Claw") then
+			IWin_CombatVar["queue"] = false
 			Cast("Claw")
 	end
 end
 
 function IWin:FerociousBite()
 	if IWin:IsSpellLearnt("Ferocious Bite")
-		and IWin:IsStanceActive("Cat Form")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Ferocious Bite")
 		and IWin:IsEnergyAvailable("Ferocious Bite")
-		and GetComboPoints() > 3 then
-			Cast("Ferocious Bite")
+		and (
+				GetComboPoints() == 5
+				or IWin:GetTimeToDie() < 10
+			) then
+				IWin_CombatVar["queue"] = false
+				Cast("Ferocious Bite")
 	end
 end
 
 function IWin:SetReservedEnergyFerocious()
-	if not (
-				not IWin:IsBuffActive("target","Rip")
-				and GetComboPoints() > 2
-				and IWin:GetTimeToDie() > 10
-				and not (
-							UnitCreatureType("target") == "Undead"
-							or UnitCreatureType("target") == "Mechanical"
-							or UnitCreatureType("target") == "Elemental"
-						)
-			)
-		and GetComboPoints() > 3 then
-		IWin:SetReservedEnergy("Ferocious Bite", "nocooldown")
+	if 	GetComboPoints() == 5
+			or IWin:GetTimeToDie() < 10 then
+				IWin:SetReservedEnergy("Ferocious Bite", "nocooldown")
 	end
 end
 
 function IWin:Rake()
 	if IWin:IsSpellLearnt("Rake")
-		and IWin:IsStanceActive("Cat Form")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Rake")
 		and IWin:IsEnergyAvailable("Rake")
-		and not IWin:IsBuffActive("target", "Rake")
+		and not IWin:IsBuffActive("target", "Rake", "player")
 		and not (
 					UnitCreatureType("target") == "Undead"
 					or UnitCreatureType("target") == "Mechanical"
 					or UnitCreatureType("target") == "Elemental"
 				) then
-			Cast("Rake")
+					IWin_CombatVar["queue"] = false
+					Cast("Rake")
 	end
 end
 
@@ -798,30 +838,56 @@ function IWin:SetReservedEnergyRake()
 				or UnitCreatureType("target") == "Mechanical"
 				or UnitCreatureType("target") == "Elemental"
 			) then
-			IWin:SetReservedEnergy("Rake", "buff", "target")
+				IWin:SetReservedEnergy("Rake", "buff", "target")
 	end
 end
 
 function IWin:Rip()
 	if IWin:IsSpellLearnt("Rip")
-		and IWin:IsStanceActive("Cat Form")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Rip")
 		and IWin:IsEnergyAvailable("Rip")
-		and not IWin:IsBuffActive("target","Rip")
-		and GetComboPoints() > 2
-		and IWin:GetTimeToDie() > 10
+		and not IWin:IsBuffActive("target","Rip","player")
+		and (
+				(
+					GetComboPoints() == 3
+					and IWin:GetTimeToDie() > 10
+					and IWin:GetTimeToDie() < 14
+				) or (
+					GetComboPoints() == 4
+					and IWin:GetTimeToDie() > 12
+					and IWin:GetTimeToDie() < 16
+				) or (
+					GetComboPoints() == 5
+					and IWin:GetTimeToDie() > 14
+				)
+			)
 		and not (
 					UnitCreatureType("target") == "Undead"
 					or UnitCreatureType("target") == "Mechanical"
 					or UnitCreatureType("target") == "Elemental"
 				) then
-			Cast("Rip")
+					IWin_CombatVar["queue"] = false
+					Cast("Rip")
 	end
 end
 
 function IWin:SetReservedEnergyRip()
-	if not IWin:IsBuffActive("target","Rip")
-		and GetComboPoints() > 2
-		and IWin:GetTimeToDie() > 10
+	if not IWin:IsBuffActive("target","Rip","player")
+		and (
+				(
+					GetComboPoints() == 3
+					and IWin:GetTimeToDie() > 10
+					and IWin:GetTimeToDie() < 14
+				) or (
+					GetComboPoints() == 4
+					and IWin:GetTimeToDie() > 12
+					and IWin:GetTimeToDie() < 16
+				) or (
+					GetComboPoints() == 5
+					and IWin:GetTimeToDie() > 14
+				)
+			)
 		and not (
 					UnitCreatureType("target") == "Undead"
 					or UnitCreatureType("target") == "Mechanical"
@@ -833,7 +899,8 @@ end
 
 function IWin:Shred()
 	if IWin:IsSpellLearnt("Shred")
-		and IWin:IsStanceActive("Cat Form")
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Shred")
 		and IWin:IsEnergyAvailable("Shred")
 		and (
 				(
@@ -842,6 +909,7 @@ function IWin:Shred()
 				)
 				or not IWin:IsTanking()
 			) then
+				IWin_CombatVar["queue"] = false
 				Cast("Shred")
 	end
 end
@@ -858,7 +926,7 @@ end
 
 function IWin:TigersFury()
 	if IWin:IsSpellLearnt("Tiger's Fury")
-		and IWin:IsStanceActive("Cat Form")
+		and not IWin:IsOnCooldown("Tiger's Fury")
 		and IWin:GetTalentRank(2,12) ~= 0
 		and IWin:IsEnergyAvailable("Tiger's Fury")
 		and not IWin:IsBuffActive("player", "Tiger's Fury")
@@ -878,12 +946,15 @@ end
 function IWin:InsectSwarm()
 	if IWin:IsSpellLearnt("Insect Swarm")
 		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Insect Swarm")
 		and IWin:GetTimeToDie() > 6
+		and not IWin:IsBuffActive("player", "Arcane Eclipse")
 		and (
-				not IWin:IsBuffActive("target", "Insect Swarm")
+				not IWin:IsBuffActive("target", "Insect Swarm", "player")
 				or (
-						IWin:GetBuffRemaining("target", "Nature Eclipse") < IWin_CastTime["Starfire"] + 0.3
-						and IWin:IsBuffActive("target", "Nature Eclipse")
+						IWin:GetBuffRemaining("player", "Nature Eclipse") < IWin_CastTime["Starfire"] + 0.3
+						and IWin:IsBuffActive("player", "Nature Eclipse")
+						and IWin:GetBuffRemaining("target", "Insect Swarm", "player") < 8
 					)
 			) then
 				IWin_CombatVar["queue"] = false
@@ -894,12 +965,15 @@ end
 function IWin:Moonfire()
 	if IWin:IsSpellLearnt("Moonfire")
 		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Moonfire")
 		and IWin:GetTimeToDie() > 6
+		and not IWin:IsBuffActive("player", "Nature Eclipse")
 		and (
-				not IWin:IsBuffActive("target", "Moonfire")
+				not IWin:IsBuffActive("target", "Moonfire", "player")
 				or (
-						IWin:GetBuffRemaining("target", "Arcane Eclipse") < IWin_CastTime["Wrath"] + 0.3
-						and IWin:IsBuffActive("target", "Arcane Eclipse")
+						IWin:GetBuffRemaining("player", "Arcane Eclipse") < IWin_CastTime["Wrath"] + 0.3
+						and IWin:IsBuffActive("player", "Arcane Eclipse")
+						and IWin:GetBuffRemaining("target", "Moonfire", "player") < 8
 					)
 			) then
 				IWin_CombatVar["queue"] = false
@@ -910,7 +984,9 @@ end
 function IWin:MoonkinForm()
 	if IWin:IsSpellLearnt("Moonkin Form")
 		and not IWin:IsStanceActive("Moonkin Form")
-		and IWin_CombatVar["queue"] then
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Moonkin Form") then
+			IWin_CombatVar["queue"] = false
 			Cast("Moonkin Form")
 	end
 end
@@ -918,25 +994,30 @@ end
 function IWin:Starfire()
 	if IWin:IsSpellLearnt("Starfire")
 		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Starfire")
 		and (
 				IWin:IsBuffActive("player", "Arcane Eclipse")
 				or (
-						not IWin:IsBuffActive("player", "Arcane Solstice")
-						and IWin:IsBuffActive("player", "Natural Solstice")
-					)
-				or (
-						IWin_CombatVar["lastMoonkinSpell"] == "Wrath"
-						and not IWin:IsBuffActive("player", "Arcane Eclipse")
-						and not IWin:IsBuffActive("player", "Nature Eclipse")
-						and not IWin:IsBuffActive("player", "Arcane Solstice")
-						and not IWin:IsBuffActive("player", "Natural Solstice")
-					)
-				or (
-						IWin_CombatVar["lastMoonkinSpell"] == "Wrath"
-						and not IWin:IsBuffActive("player", "Arcane Eclipse")
-						and not IWin:IsBuffActive("player", "Nature Eclipse")
-						and IWin:IsBuffActive("player", "Arcane Solstice")
-						and IWin:IsBuffActive("player", "Natural Solstice")
+						not IWin:IsBuffActive("player", "Nature Eclipse")
+						and (
+									(
+										not IWin:IsBuffActive("player", "Arcane Solstice")
+										and IWin:IsBuffActive("player", "Natural Solstice")
+									)
+								or (
+										IWin_CombatVar["lastMoonkinSpell"] == "Wrath"
+										and not IWin:IsBuffActive("player", "Arcane Eclipse")
+										and not IWin:IsBuffActive("player", "Nature Eclipse")
+										and (
+												not IWin:IsBuffActive("player", "Arcane Solstice")
+												and not IWin:IsBuffActive("player", "Natural Solstice")
+											) or (
+												IWin:IsBuffActive("player", "Arcane Solstice")
+												and IWin:IsBuffActive("player", "Natural Solstice")
+											)
+											
+									)
+							)
 					)
 			) then
 				IWin_CombatVar["queue"] = false
@@ -946,7 +1027,8 @@ end
 
 function IWin:StarfireOOC()
 	if not UnitAffectingCombat("player")
-		and not UnitAffectingCombat("target") then
+		and not UnitAffectingCombat("target")
+		and not UnitIsPVP("target") then
 			IWin:Starfire()
 	end
 end
@@ -954,25 +1036,30 @@ end
 function IWin:Wrath()
 	if IWin:IsSpellLearnt("Wrath")
 		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Wrath")
 		and (
 				IWin:IsBuffActive("player", "Nature Eclipse")
 				or (
-						not IWin:IsBuffActive("player", "Natural Solstice")
-						and IWin:IsBuffActive("player", "Arcane Solstice")
-					)
-				or (
-						IWin_CombatVar["lastMoonkinSpell"] == "Starfire"
-						and not IWin:IsBuffActive("player", "Arcane Eclipse")
-						and not IWin:IsBuffActive("player", "Nature Eclipse")
-						and not IWin:IsBuffActive("player", "Arcane Solstice")
-						and not IWin:IsBuffActive("player", "Natural Solstice")
-					)
-				or (
-						IWin_CombatVar["lastMoonkinSpell"] == "Starfire"
-						and not IWin:IsBuffActive("player", "Arcane Eclipse")
-						and not IWin:IsBuffActive("player", "Nature Eclipse")
-						and IWin:IsBuffActive("player", "Arcane Solstice")
-						and IWin:IsBuffActive("player", "Natural Solstice")
+						not IWin:IsBuffActive("player", "Arcane Eclipse")
+						and (
+									(
+										not IWin:IsBuffActive("player", "Natural Solstice")
+										and IWin:IsBuffActive("player", "Arcane Solstice")
+									)
+								or (
+										IWin_CombatVar["lastMoonkinSpell"] == "Starfire"
+										and not IWin:IsBuffActive("player", "Arcane Eclipse")
+										and not IWin:IsBuffActive("player", "Nature Eclipse")
+										and (
+												not IWin:IsBuffActive("player", "Arcane Solstice")
+												and not IWin:IsBuffActive("player", "Natural Solstice")
+											) or (
+												IWin:IsBuffActive("player", "Arcane Solstice")
+												and IWin:IsBuffActive("player", "Natural Solstice")
+											)
+											
+									)
+							)
 					)
 			) then
 				IWin_CombatVar["queue"] = false
@@ -982,7 +1069,8 @@ end
 
 function IWin:WrathFiller()
 	if IWin:IsSpellLearnt("Wrath")
-		and IWin_CombatVar["queue"] then
+		and IWin_CombatVar["queue"]
+		and not IWin:IsOnCooldown("Wrath") then
 			IWin_CombatVar["queue"] = false
 			DEFAULT_CHAT_FRAME:AddMessage("filler")
 			Cast("Wrath")
@@ -991,7 +1079,8 @@ end
 
 function IWin:WrathOOC()
 	if not UnitAffectingCombat("player")
-		and not UnitAffectingCombat("target") then
+		and not UnitAffectingCombat("target")
+		and not UnitIsPVP("target") then
 			IWin:Wrath()
 	end
 end
@@ -1032,8 +1121,8 @@ end
 ---- iblast button ----
 SLASH_IBLAST1 = '/iblast'
 function SlashCmdList.IBLAST()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
 	IWin:StartAttack()
 	IWin:MarkOfTheWild()
 	IWin:Thorns()
@@ -1041,8 +1130,8 @@ function SlashCmdList.IBLAST()
 	IWin:MoonkinForm()
 	IWin:WrathOOC()
 	IWin:StarfireOOC()
-	IWin:Moonfire()
 	IWin:InsectSwarm()
+	IWin:Moonfire()
 	IWin:Wrath()
 	IWin:Starfire()
 	IWin:WrathFiller()
@@ -1051,8 +1140,8 @@ end
 ---- iruetoo button ----
 SLASH_IRUETOO1 = '/iruetoo'
 function SlashCmdList.IRUETOO()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
 	IWin:MarkOfTheWild()
 	IWin:Thorns()
 	IWin:CancelRoot()
@@ -1076,17 +1165,20 @@ end
 ---- itank button ----
 SLASH_ITANK1 = '/itank'
 function SlashCmdList.ITANK()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
 	IWin:MarkSkull()
 	IWin:MarkOfTheWild()
 	IWin:Thorns()
 	IWin:CancelRoot()
 	IWin:BearForm()
+	IWin:FeralCharge()
 	IWin:FaerieFireFeral()
 	IWin:DemoralizingRoar()
 	IWin:SetReservedRage("Demoralizing Roar", "buff", "target")
 	IWin:Enrage()
+	IWin:SavageBite(GCD)
+	IWin:SetReservedRage("Savage Bite", "cooldown")
 	IWin:Maul()
 	IWin:SetReservedRage("Maul", "nocooldown")
 	IWin:Swipe()
@@ -1096,12 +1188,13 @@ end
 ---- ihodor button ----
 SLASH_IHODOR1 = '/ihodor'
 function SlashCmdList.IHODOR()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
 	IWin:MarkSkull()
 	IWin:MarkOfTheWild()
 	IWin:Thorns()
 	IWin:BearForm()
+	IWin:FeralCharge()
 	IWin:DemoralizingRoar()
 	IWin:SetReservedRage("Demoralizing Roar", "buff", "target")
 	IWin:Swipe()
@@ -1114,8 +1207,8 @@ end
 ---- ichase button ----
 SLASH_ICHASE1 = '/ichase'
 function SlashCmdList.ICHASE()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
 	IWin:CancelRootReact()
 	IWin:CancelSlow()
 	IWin:StartAttack()
@@ -1124,8 +1217,8 @@ end
 ---- irun button ----
 SLASH_IRUN1 = '/irun'
 function SlashCmdList.IRUN()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
 	IWin:CancelRootReact()
 	IWin:CancelSlowReact()
 	IWin:StartAttack()
@@ -1134,8 +1227,9 @@ end
 ---- itaunt button ----
 SLASH_ITAUNT1 = '/itaunt'
 function SlashCmdList.ITAUNT()
-	IWin:InitializeRotation()
 	IWin:TargetEnemy()
+	IWin:InitializeRotation()
+	IWin:BearForm()
 	IWin:Growl()
 	IWin:StartAttack()
 end
