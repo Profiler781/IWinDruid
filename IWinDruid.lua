@@ -38,8 +38,8 @@ IWin:SetScript("OnEvent", function()
 		if IWin_Druid["playerToNPCHealthRatio"] == nil then IWin_Druid["playerToNPCHealthRatio"] = 0.75 end
 		if IWin_Druid["frontShred"] == nil then IWin_Druid["frontShred"] = "off" end
 		IWin.hasSuperwow = SetAutoloot and true or false
-	elseif event == "ADDON_LOADED" and (arg1 == "SuperCleveRoidMacros" or arg1 == "pfUI" or arg1 == "ShaguTweaks" or arg1 == "IWinDruid") then
-		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff-- or pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
+	elseif event == "ADDON_LOADED" and (arg1 == "SuperCleveRoidMacros" or arg1 == "IWinDruid") then
+		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff
 	elseif event == "SPELLCAST_START" and (arg1 == "Wrath" or arg1 == "Starfire") then
 		IWin_CombatVar["lastMoonkinSpell"] = arg1
 		IWin_CombatVar["lastMoonkinSpellTime"] = GetTime() + (arg2 / 1000)
@@ -499,12 +499,10 @@ function IWin:InitializeRotation()
     	return 0
 	end
 	if not IWin.libdebuff then
-		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff-- or pfUI and pfUI.api and pfUI.api.libdebuff or ShaguTweaks and ShaguTweaks.libdebuff
+		IWin.libdebuff = CleveRoids and CleveRoids.libdebuff
     	if not IWin.libdebuff then
-	    	DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFFSuperCleveRoidMacros|r (recommanded) or |cFF00FFFFpfUI|r or |cFF00FFFFShaguTweaks|r required:")
+	    	DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFFSuperCleveRoidMacros|r required:")
 	        DEFAULT_CHAT_FRAME:AddMessage("https://github.com/jrc13245/SuperCleveRoidMacros")
-	        DEFAULT_CHAT_FRAME:AddMessage("https://github.com/shagu/pfUI")
-	        DEFAULT_CHAT_FRAME:AddMessage("https://github.com/shagu/ShaguTweaks")
 	    	return 0
 	    end
 	end
