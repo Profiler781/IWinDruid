@@ -185,10 +185,22 @@ end
 
 function IWin:GetBuffRemaining(unit, spell, owner)
 	-- Debuff scan
-	for index = 1, 32 do
+	for index = 1, 64 do
 	    local effect, _, texture, stacks, dtype, duration, timeleft, caster = IWin.libdebuff:UnitDebuff(unit, index)
-	    if not effect then break end
-	    if effect == spell and ((not owner) or (caster == owner)) then
+	    --if not effect then break end
+	    if effect and effect == spell and ((not owner) or (caster == owner)) then
+	    	-- This 'name' is a recognized debuff, whether it came from
+	        -- the standard debuff slots or the overflow buff slots.
+	        if dtype == "Disease" or dtype == "Curse" or dtype == "Magic" or dtype == "Poison" then
+	            -- This is a standard debuff aura.
+	            -- Print it to chat for demonstration.
+	            --CleveRoids.Print(string.format("Debuff (Standard): %s on %s. Remaining: %.1fs", effect, UnitName("target"), timeleft))
+	        else
+	            -- This debuff was found in a buff slot (overflow).
+	            -- Note: 'dtype' will be nil for a UnitBuff result, 
+	            -- but the name/spellID identifies it as a debuff due to the lib.durations check.
+	            CleveRoids.Print(string.format("|cFFFF0000DEBUFF OVERFLOW:|r %s on %s. Remaining: %.1fs", effect, UnitName(unit), timeleft))
+	        end
 	        return timeleft
 	    end
 	end
@@ -211,10 +223,22 @@ end
 
 function IWin:GetBuffStack(unit, spell, owner)
 	-- Debuff scan
-	for index = 1, 32 do
+	for index = 1, 64 do
 	    local effect, _, texture, stacks, dtype, duration, timeleft, caster = IWin.libdebuff:UnitDebuff(unit, index)
-	    if not effect then break end
-	    if effect == spell and ((not owner) or (caster == owner)) then
+	    --if not effect then break end
+	    if effect and effect == spell and ((not owner) or (caster == owner)) then
+	    	-- This 'name' is a recognized debuff, whether it came from
+	        -- the standard debuff slots or the overflow buff slots.
+	        if dtype == "Disease" or dtype == "Curse" or dtype == "Magic" or dtype == "Poison" then
+	            -- This is a standard debuff aura.
+	            -- Print it to chat for demonstration.
+	            --CleveRoids.Print(string.format("Debuff (Standard): %s on %s. Remaining: %.1fs", effect, UnitName("target"), timeleft))
+	        else
+	            -- This debuff was found in a buff slot (overflow).
+	            -- Note: 'dtype' will be nil for a UnitBuff result, 
+	            -- but the name/spellID identifies it as a debuff due to the lib.durations check.
+	            CleveRoids.Print(string.format("|cFFFF0000DEBUFF OVERFLOW:|r %s on %s. Remaining: %.1fs", effect, UnitName(unit), timeleft))
+	        end
 	        return stacks
 	    end
 	end
