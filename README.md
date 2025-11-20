@@ -1,5 +1,9 @@
 # IWinDruid v0.3
 
+## IWinDruid has been integrated into IWinEnhanced. Only IWinEnhanced will receive updates.
+
+[IWinEnhanced](https://github.com/Profiler781/IWinEnhanced/)
+
 Smart macros for Turtle Druids v1.18.0. Make macros with commands. Put them on your action bars. Enjoy!
 
 /!\ IN DEVELOPMENT
@@ -10,11 +14,8 @@ Author: Agamemnoth (discord)
 
     /iblast      Single target caster rotation
     /iruetoo     Single target cat rotation
-    /isacat      Multi target cat rotation
     /itank       Single target bear rotation
     /ihodor      Multi target bear rotation
-    /ichase      Stick to your target TODO
-    /ikick       Kick TODO
     /itaunt      Growl if the target is not under another taunt effect
 
 ## Setup commands

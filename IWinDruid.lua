@@ -22,6 +22,7 @@ IWin_CombatVar = {
 local Cast = CastSpellByName
 local GCD = 1.5
 local GCDCat = 1
+local IWinMigrationMessage = true
 
 ---- Event Register ----
 IWin:RegisterEvent("ADDON_LOADED")
@@ -199,7 +200,7 @@ function IWin:GetBuffRemaining(unit, spell, owner)
 	            -- This debuff was found in a buff slot (overflow).
 	            -- Note: 'dtype' will be nil for a UnitBuff result, 
 	            -- but the name/spellID identifies it as a debuff due to the lib.durations check.
-	            CleveRoids.Print(string.format("|cFFFF0000DEBUFF OVERFLOW:|r %s on %s. Remaining: %.1fs", effect, UnitName(unit), timeleft))
+	            --CleveRoids.Print(string.format("|cFFFF0000DEBUFF OVERFLOW:|r %s on %s. Remaining: %.1fs", effect, UnitName(unit), timeleft))
 	        end
 	        return timeleft
 	    end
@@ -237,7 +238,7 @@ function IWin:GetBuffStack(unit, spell, owner)
 	            -- This debuff was found in a buff slot (overflow).
 	            -- Note: 'dtype' will be nil for a UnitBuff result, 
 	            -- but the name/spellID identifies it as a debuff due to the lib.durations check.
-	            CleveRoids.Print(string.format("|cFFFF0000DEBUFF OVERFLOW:|r %s on %s. Remaining: %.1fs", effect, UnitName(unit), timeleft))
+	            --CleveRoids.Print(string.format("|cFFFF0000DEBUFF OVERFLOW:|r %s on %s. Remaining: %.1fs", effect, UnitName(unit), timeleft))
 	        end
 	        return stacks
 	    end
@@ -517,6 +518,11 @@ function IWin:MarkSkull()
 end
 
 function IWin:InitializeRotation()
+	if IWinMigrationMessage then
+		DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFFIWinDruid|r has been integrated into |cFF00FFFF|cFF00FFFFIWinEnhanced|r. Only |cFF00FFFFIWinEnhanced|r will receive updates.")
+        DEFAULT_CHAT_FRAME:AddMessage("https://github.com/Profiler781/IWinEnhanced")
+        IWinMigrationMessage = false
+    end
 	if not IWin.hasSuperwow then
     	DEFAULT_CHAT_FRAME:AddMessage("|cFF00FFFFbalakethelock's SuperWoW|r required:")
         DEFAULT_CHAT_FRAME:AddMessage("https://github.com/balakethelock/SuperWoW")
@@ -1172,6 +1178,7 @@ function SlashCmdList.IRUETOO()
 	IWin:TigersFury()
 	IWin:SetReservedEnergyTigersFury()
 	IWin:FaerieFireFeral()
+	DEFAULT_CHAT_FRAME:AddMessage("Rip: "..tostring(IWin:GetBuffRemaining("target","Rip","player")))
 	IWin:Rip()
 	IWin:SetReservedEnergyRip()
 	IWin:FerociousBite()
